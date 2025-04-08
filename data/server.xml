@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+    版权声明：版权所有 (c) 2025 Kevin Chang
+    未经许可，不得复制、分发或修改本文件内容。
+    任何未经授权的使用将追究法律责任。
+-->
+<data>
+    <!--- 服务端数据 -->
+    <server>
+        <!-- 服务器地址 -->
+        <ip>127.0.0.1</ip>
+        <!-- 服务器端口 -->
+        <port>3624</port>
+    </server>
+    <accounts>
+        <account>
+            <username>admin</username>
+            <password>admin</password>
+        </account>
+        <account>
+            <username>user2</username>
+            <password>admin</password>
+        </account>
+    </accounts>
+</data>
