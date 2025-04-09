@@ -6,6 +6,7 @@
 # @Author  : Kevin Chang
 import socket
 import threading
+import traceback
 import xml.etree.ElementTree as ElementTree
 import json
 import sys
@@ -28,6 +29,39 @@ def read_xml(keyword):
         raise ValueError(f"Keyword '{keyword}' not found in XML or invalid format.") from e
 
 
+def save_chat_history_to_xml(message, username, user):
+    """将聊天记录保存到XML文件，按用户名区分"""
+    from xml.dom import minidom
+    try:
+        tree = ElementTree.parse(r'data/client.xml')
+        root = tree.getroot()
+        chat_node = root.find(f".//chatlog/{user}/chat[username='{username}']")
+        if chat_node is None:
+            chat_node = ElementTree.SubElement(root.find(".//chatlog"), "chat")
+            username_node = ElementTree.SubElement(chat_node, "username")
+            username_node.text = username
+            chat_subnode = ElementTree.SubElement(chat_node, "chat")
+            str(chat_subnode)
+
+        else:
+            chat_subnode = chat_node.find("chat")
+            message_node = ElementTree.SubElement(chat_subnode, "message")
+            message_node.text = message
+
+            # 格式化XML
+            xml_str = ElementTree.tostring(root, encoding='utf-8')
+            pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
+
+            # 去除多余的空行
+            pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
+
+            with open(r'data/client.xml', 'w', encoding='utf-8') as f:
+                f.write(pretty_xml_str)
+    except Exception as e:
+        print(f"Error saving chat history to XML: {e}")
+        print(traceback.format_exc())
+
+
 def read_accounts():
     tree = ElementTree.parse(r'data/server.xml')
     root = tree.getroot()
@@ -41,6 +75,7 @@ def read_accounts():
 
 def send_message(message, conn):
     conn.sendall(json.dumps(message).encode("utf-8") + b"\n")
+    print("Send:" + json.dumps(message) + "\n")
 
 
 def handle_client(conn, addr):
@@ -62,7 +97,7 @@ def handle_client(conn, addr):
                 if username in accounts and accounts[username] == password:
                     with lock:  # 使用锁保护全局变量
                         if username in logged_in_clients:
-                            send_message({"type": "warning_message", "message": "Already logged in"}, conn)
+                            send_message({"type": "error_message", "message": "Already logged in"}, conn)
                             conn.close()
                             clients.remove(conn)
                             del logged_in_clients[username]  # 使用del删除已登录的客户端
@@ -91,9 +126,12 @@ def handle_client(conn, addr):
                 if username is None:
                     send_message({"type": "error_message", "message": "Please log in first"}, conn)
                     continue
-                # 广播消息给所有客户端，包括发送方客户端
-                for client_conn in clients:
-                    send_message({"message": f"{username}: {message['data']}"}, client_conn)
+                if username == "admin":
+                    # 广播消息给所有客户端，包括发送方客户端
+                    for client_conn in clients:
+                        send_message({"message": f"{username}: {message['data']}"}, client_conn)
+                else:
+                    send_message({"type": "warning_message", "message": "You are not admin"}, conn)
             elif message['type'] == "message":  # 处理私信消息
                 target = message['data']['target']
                 whisper_message = message['data']['message']
@@ -107,14 +145,15 @@ def handle_client(conn, addr):
                     continue
                 target_conn = logged_in_clients.get(target)
                 if target_conn:
-                    message_content = f"Message from {username}: {whisper_message}"
-                    send_message({"type": "new_message", "message": message_content}, target_conn)
+                    # 修改发送的消息格式
+                    message_content = {"type": "new_message", "data": {"target": username, "message": whisper_message}}
+                    send_message(message_content, target_conn)
                     send_message({"type": "server_message", "message": "Message sent"}, conn)
                 else:
-                    send_message({"type": "error_message", "message": "Target user not found"}, conn)
+                    send_message({"type": "warning_message", "message": "Target user not online"}, conn)
         except Exception as e:
             print(f"Error handling client: {e}")
-            send_message({"type": "error_message", "message": "An error occurred on the server"}, conn)
+            send_message({"type": "warning_message", "message": "An error occurred on the server"}, conn)
             break
     with lock:  # 使用锁保护全局变量
         conn.close()
