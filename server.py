@@ -29,44 +29,71 @@ def read_xml(keyword):
         raise ValueError(f"Keyword '{keyword}' not found in XML or invalid format.") from e
 
 
-def save_chat_history_to_xml(message, username, user):
+def save_chat_history_to_xml(message, username, target):
     """将聊天记录保存到XML文件，按用户名区分"""
     from xml.dom import minidom
     try:
-        tree = ElementTree.parse(r'data/client.xml')
+        tree = ElementTree.parse(r'data/server.xml')
         root = tree.getroot()
-        chat_node = root.find(f".//chatlog/{user}/chat[username='{username}']")
-        if chat_node is None:
-            chat_node = ElementTree.SubElement(root.find(".//chatlog"), "chat")
-            username_node = ElementTree.SubElement(chat_node, "username")
+        user_node = root.find(f".//chatlog/user[username='{username}']")
+        if user_node is None:
+            user_node = ElementTree.SubElement(root.find(".//chatlog"), "user")
+            username_node = ElementTree.SubElement(user_node, "username")
             username_node.text = username
-            chat_subnode = ElementTree.SubElement(chat_node, "chat")
-            str(chat_subnode)
 
-        else:
-            chat_subnode = chat_node.find("chat")
-            message_node = ElementTree.SubElement(chat_subnode, "message")
-            message_node.text = message
+        # 检查是否已经存在目标用户的聊天记录
+        chat_node = user_node.find(f".//chat/target[text()='{target}']/..")
+        if chat_node is None:
+            chat_node = ElementTree.SubElement(user_node, "chat")
+            target_node = ElementTree.SubElement(chat_node, "target")
+            target_node.text = target
 
-            # 格式化XML
-            xml_str = ElementTree.tostring(root, encoding='utf-8')
-            pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
+        message_node = ElementTree.SubElement(chat_node, "message")
+        message_node.text = message
 
-            # 去除多余的空行
-            pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
+        # 格式化XML
+        xml_str = ElementTree.tostring(root, encoding='utf-8')
+        pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
 
-            with open(r'data/client.xml', 'w', encoding='utf-8') as f:
-                f.write(pretty_xml_str)
+        # 去除多余的空行
+        pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
+
+        with open(r'data/server.xml', 'w', encoding='utf-8') as f:
+            f.write(pretty_xml_str)
     except Exception as e:
         print(f"Error saving chat history to XML: {e}")
         print(traceback.format_exc())
+
+
+def read_chat_history_from_xml(username):
+    """从XML文件中读取指定用户的聊天记录"""
+    try:
+        tree = ElementTree.parse(r'data/server.xml')
+        root = tree.getroot()
+        user_node = root.find(f".//chatlog/user[username='{username}']")
+        if user_node is not None:
+            chat_history = []
+            for chat_node in user_node.findall("chat"):
+                target_node = chat_node.find("target")
+                if target_node is not None:
+                    target = target_node.text
+                    messages = [msg.text for msg in chat_node.findall("message")]
+                    chat_history.extend([f"{target}: {msg}" for msg in messages])
+                else:
+                    print(f"Warning: <chat> node without <target> for user {username}")
+            return chat_history
+        return []
+    except Exception as e:
+        print(f"Error reading chat history from XML: {e}")
+        print(traceback.format_exc())
+        return []
 
 
 def read_accounts():
     tree = ElementTree.parse(r'data/server.xml')
     root = tree.getroot()
     accounts = {}
-    for account in root.findall(".//account"):
+    for account in root.findall(".//accounts/account"):
         username = account.find("username").text
         password = account.find("password").text
         accounts[username] = password
@@ -149,8 +176,17 @@ def handle_client(conn, addr):
                     message_content = {"type": "new_message", "data": {"target": username, "message": whisper_message}}
                     send_message(message_content, target_conn)
                     send_message({"type": "server_message", "message": "Message sent"}, conn)
+                    # 保存聊天记录到XML，按用户名区分
+                    save_chat_history_to_xml(whisper_message, username, target)
                 else:
                     send_message({"type": "warning_message", "message": "Target user not online"}, conn)
+                    save_chat_history_to_xml(whisper_message, username, target)
+            elif message['type'] == "get_chat_history":  # 处理获取聊天记录的消息
+                username = message['data']['username']
+                chat_history = read_chat_history_from_xml(username)
+                print(f"Chat history for {username}: {chat_history}")
+                # 修改返回的聊天记录格式，包含用户名
+                send_message({"type": "chat_history", "data": {"username": username, "history": chat_history}}, conn)
         except Exception as e:
             print(f"Error handling client: {e}")
             send_message({"type": "warning_message", "message": "An error occurred on the server"}, conn)

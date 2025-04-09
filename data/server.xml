@@ -22,4 +22,25 @@
             <password>admin</password>
         </account>
     </accounts>
+    <!--- 聊天记录 -->
+    <chatlog>
+        <!--- 不同用户的聊天记录 -->
+        <user>
+            <!--- 用户的用户名 -->
+            <username>admin</username>
+            <!--- 用户的不同聊天的聊天记录 -->
+            <chat>
+                <!--- 聊天的对方 -->
+                <target>admin</target>
+                <!--- 聊天内容 -->
+                <message>admin: hello</message>
+                <message>admin: hello</message>
+            </chat>
+            <chat>
+                <target>user2</target>
+                <message>user2: hello</message>
+                <message>user2: hello</message>
+            </chat>
+        </user>
+  </chatlog>
 </data>

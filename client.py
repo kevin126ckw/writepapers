@@ -53,7 +53,6 @@ class ClientApp(GUI):
 
     @staticmethod
     def read_contacts_from_xml():
-        import xml.etree.ElementTree as ElementTree
         try:
             tree = ElementTree.parse(r'data/client.xml')
             root = tree.getroot()
@@ -67,7 +66,6 @@ class ClientApp(GUI):
     @staticmethod
     def read_chat_history_from_xml(username):
         """从XML文件中读取指定用户的聊天记录"""
-        import xml.etree.ElementTree as ElementTree
         try:
             tree = ElementTree.parse(r'data/client.xml')
             root = tree.getroot()
@@ -84,7 +82,6 @@ class ClientApp(GUI):
     @staticmethod
     def save_chat_history_to_xml(message, username):
         """将聊天记录保存到XML文件，按用户名区分"""
-        import xml.etree.ElementTree as ElementTree
         from xml.dom import minidom
 
         try:
@@ -97,7 +94,13 @@ class ClientApp(GUI):
                 username_node.text = username
                 chat_subnode = ElementTree.SubElement(chat_node, "chat")
             else:
+                # 清空现有的聊天记录节点
                 chat_subnode = chat_node.find("chat")
+                for message_node in chat_subnode.findall("message"):
+                    chat_subnode.remove(message_node)
+
+            # 添加新的聊天记录
+
             message_node = ElementTree.SubElement(chat_subnode, "message")
             message_node.text = message
 
@@ -122,6 +125,7 @@ class ClientApp(GUI):
             self.sock.connect((server_ip, server_port))
             self.status_bar.config(text="已连接到服务器")
             self.show_login_dialog()
+
         except Exception as e:
             messagebox.showerror("连接失败", f"无法连接到服务器: {e}")
             print(traceback.format_exc())
@@ -136,6 +140,8 @@ class ClientApp(GUI):
         self.password_entry = ttk.Entry(dialog, show='*')
         self.username_entry.grid(row=0, column=1)
         self.password_entry.grid(row=1, column=1)
+        self.username_entry.insert(0, self.read_xml("account/username"))
+        self.password_entry.insert(0, self.read_xml("account/password"))
         login_btn = ttk.Button(dialog, text="登录", command=self.login)
         login_btn.grid(row=2, columnspan=2)
         self.login_dialog = dialog
@@ -153,12 +159,15 @@ class ClientApp(GUI):
         self.send_message_to_server(message)
         self.login_dialog.destroy()
         self.username = username
+        # 请求聊天记录
+        threading.Thread(target=self.request_chat_history, daemon=True).start()
         self.root.deiconify()
 
     def send_message_to_server(self, message):
         if self.sock:
             try:
                 self.sock.sendall(json.dumps(message).encode('utf-8') + b'\n')
+                print(f"发送成功: {json.dumps(message) + '\n'}")
             except Exception as e:
                 print(f"发送失败: {e}")
                 print(traceback.format_exc())
@@ -170,17 +179,30 @@ class ClientApp(GUI):
         # 保存聊天记录到XML，按用户名区分
         self.save_chat_history_to_xml(message, username)
 
+    def request_chat_history(self):
+        if self.sock:
+            try:
+                message = {
+                    'type': 'get_chat_history',
+                    'data': {
+                        'username': self.username
+                    }
+                }
+                self.send_message_to_server(message)
+            except Exception as e:
+                print(f"请求聊天记录失败: {e}")
+                print(traceback.format_exc())
+
     def receive_messages(self):
-        global message_content
         while True:
             try:
                 data = self.sock.recv(1024).decode()
                 if not data:
                     break
                 messages = data.split('\n')
-                for msg in messages:
-                    if msg:
-                        msg_dict = json.loads(msg)
+                for message_data in messages:  # 将内部循环的变量名改为message_data
+                    if message_data:
+                        msg_dict = json.loads(message_data)
                         print(msg_dict)
                         # 修改解析逻辑
                         if msg_dict.get('type') == 'new_message':
@@ -208,8 +230,16 @@ class ClientApp(GUI):
                                     app_name='WritePapers'
                                 )
                         elif msg_dict.get('type') == 'error_message':
+                            message_content = msg_dict['message']
                             print(f"Error message: {message_content}")
                             sys.exit(1)
+                        elif msg_dict.get('type') == 'chat_history':
+                            chat_data = msg_dict['data']
+                            username = chat_data['username']
+                            chat_history = chat_data['history']
+                            # 保存聊天记录到XML
+                            for msg in chat_history:
+                                self.save_chat_history_to_xml(msg.split(': ')[1] + ":" + msg.split(': ')[2], msg.split(':')[0])
             except Exception as e:
                 print(f"接收消息错误: {e}")
                 print(traceback.format_exc())
@@ -238,10 +268,12 @@ class ClientApp(GUI):
             for msg in chat_history:
                 self.msg_display.insert(tk.END, msg + '\n')
             self.msg_display.config(state=tk.DISABLED)
+        str(event)
 
     def on_window_resize(self, event):
         self.contact_list.config(height=int(self.root.winfo_height() * 0.046))
         self.msg_display.config(height=int(self.root.winfo_height() * 0.046), width=int(self.root.winfo_width() * 0.7))
+        str(event)
 
     def send_message(self):
         message_content = self.input_box.get()
@@ -271,10 +303,14 @@ class ClientApp(GUI):
         sys.exit(0)
 
 
-if __name__ == "__main__":
+def main():
     root = tk.Tk()
     app = ClientApp(root)
     # 绑定列表框选择事件
     app.contact_list.bind('<<ListboxSelect>>', app.on_contact_select)
     sv_ttk.set_theme(darkdetect.theme())
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
