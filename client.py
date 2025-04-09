@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+# @Time    : 2025/4/7
+# @File    : server.py
+# @Software: PyCharm
+# @Desc    :
+# @Author  : Kevin Chang
 import json
 import socket
 import sys
