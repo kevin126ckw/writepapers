@@ -21,6 +21,47 @@ from plyer import notification
 from GUI import GUI
 
 
+def save_chat_history_to_xml(message, username):
+    """将聊天记录保存到XML文件，按用户名区分，根据消息ID去重后合并新消息"""
+    from xml.dom import minidom
+
+    try:
+        tree = ElementTree.parse(r'data/client.xml')
+        root = tree.getroot()
+        chat_node = root.find(f".//chatlog/chat[username='{username}']")
+        if chat_node is None:
+            chat_node = ElementTree.SubElement(root.find(".//chatlog"), "chat")
+            username_node = ElementTree.SubElement(chat_node, "username")
+            username_node.text = username
+
+        # 解析新消息的ID和内容
+        new_message_id = str(int(time.time()))
+        new_message_content = message
+
+        # 检查是否已存在相同ID的消息
+        existing_message = chat_node.find(f".//message[id='{new_message_id}']")
+        if existing_message is None:
+            # 添加新的聊天记录
+            message_node = ElementTree.SubElement(chat_node, "message")
+            id_node = ElementTree.SubElement(message_node, "id")
+            id_node.text = new_message_id
+            content_node = ElementTree.SubElement(message_node, "content")
+            content_node.text = new_message_content
+
+        # 格式化XML
+        xml_str = ElementTree.tostring(root, encoding='utf-8')
+        pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
+
+        # 去除多余的空行
+        pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
+
+        with open(r'data/client.xml', 'w', encoding='utf-8') as f:
+            f.write(pretty_xml_str)
+    except Exception as e:
+        print(f"Error saving chat history to XML: {e}")
+        print(traceback.format_exc())
+
+
 class ClientApp(GUI):
     def __init__(self, root):
         super().__init__(root)
@@ -69,53 +110,24 @@ class ClientApp(GUI):
         try:
             tree = ElementTree.parse(r'data/client.xml')
             root = tree.getroot()
-            chat_node = root.find(f".//chatlog/chat[username='{username}']/chat")
+            chat_node = root.find(f".//chatlog/chat[username='{username}']")
             if chat_node is not None:
-                chat_history = [msg.text for msg in chat_node.findall("message")]
+                chat_history = []
+                for msg_node in chat_node.findall("message"):
+                    message_id = msg_node.find("id").text
+                    content_node = msg_node.find("content")
+                    if content_node is not None:
+                        content = content_node.text
+                        chat_history.append({
+                            "id": message_id,
+                            "content": content
+                        })
                 return chat_history
             return []
         except Exception as e:
             print(f"Error reading chat history from XML: {e}")
             print(traceback.format_exc())
             return []
-
-    @staticmethod
-    def save_chat_history_to_xml(message, username):
-        """将聊天记录保存到XML文件，按用户名区分"""
-        from xml.dom import minidom
-
-        try:
-            tree = ElementTree.parse(r'data/client.xml')
-            root = tree.getroot()
-            chat_node = root.find(f".//chatlog/chat[username='{username}']")
-            if chat_node is None:
-                chat_node = ElementTree.SubElement(root.find(".//chatlog"), "chat")
-                username_node = ElementTree.SubElement(chat_node, "username")
-                username_node.text = username
-                chat_subnode = ElementTree.SubElement(chat_node, "chat")
-            else:
-                # 清空现有的聊天记录节点
-                chat_subnode = chat_node.find("chat")
-                for message_node in chat_subnode.findall("message"):
-                    chat_subnode.remove(message_node)
-
-            # 添加新的聊天记录
-
-            message_node = ElementTree.SubElement(chat_subnode, "message")
-            message_node.text = message
-
-            # 格式化XML
-            xml_str = ElementTree.tostring(root, encoding='utf-8')
-            pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
-
-            # 去除多余的空行
-            pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
-
-            with open(r'data/client.xml', 'w', encoding='utf-8') as f:
-                f.write(pretty_xml_str)
-        except Exception as e:
-            print(f"Error saving chat history to XML: {e}")
-            print(traceback.format_exc())
 
     def connect_to_server(self):
         try:
@@ -177,7 +189,7 @@ class ClientApp(GUI):
         self.msg_display.insert(tk.END, message + '\n')
         self.msg_display.config(state=tk.DISABLED)
         # 保存聊天记录到XML，按用户名区分
-        self.save_chat_history_to_xml(message, username)
+        save_chat_history_to_xml(message, username)
 
     def request_chat_history(self):
         if self.sock:
@@ -219,7 +231,7 @@ class ClientApp(GUI):
                                     timeout=5,
                                     app_name='WritePapers'
                                 )
-                                self.save_chat_history_to_xml(message_content, target)
+                                save_chat_history_to_xml(message_content, target)
                             else:
                                 # 处理系统消息
                                 self.update_chat_display(f"system: {message_content}", 'system')
@@ -239,7 +251,15 @@ class ClientApp(GUI):
                             chat_history = chat_data['history']
                             # 保存聊天记录到XML
                             for msg in chat_history:
-                                self.save_chat_history_to_xml(msg.split(': ')[1] + ":" + msg.split(': ')[2], msg.split(':')[0])
+                                try:
+                                    target = msg.get("target", "unknown")
+                                    message_id = msg.get("id", "unknown")
+                                    content = msg.get("content", "unknown")
+                                    save_chat_history_to_xml(f"{target}: {content}", username)
+                                    print(f"save chat history to xml:{target}: {content}", username)
+                                except Exception as e:
+                                    print(f"Error parsing chat history message: {e}")
+
             except Exception as e:
                 print(f"接收消息错误: {e}")
                 print(traceback.format_exc())
@@ -266,7 +286,9 @@ class ClientApp(GUI):
             self.msg_display.config(state=tk.NORMAL)
             self.msg_display.delete('1.0', tk.END)
             for msg in chat_history:
-                self.msg_display.insert(tk.END, msg + '\n')
+                # 将字典格式的消息转换为字符串
+                msg_str = f"{msg['id']}: {msg['content']}"
+                self.msg_display.insert(tk.END, msg_str + '\n')
             self.msg_display.config(state=tk.DISABLED)
         str(event)
 
@@ -309,7 +331,15 @@ def main():
     # 绑定列表框选择事件
     app.contact_list.bind('<<ListboxSelect>>', app.on_contact_select)
     sv_ttk.set_theme(darkdetect.theme())
-    root.mainloop()
+
+    try:
+        root.mainloop()
+    except KeyboardInterrupt:
+        print("KeyboardInterrupt received. Exiting...")
+        if app.sock:
+            app.sock.close()
+        app.on_exit()
+        sys.exit(0)
 
 
 if __name__ == "__main__":

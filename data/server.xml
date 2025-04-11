@@ -1,46 +1,55 @@
-<?xml version="1.0" encoding="utf-8" ?>
-<!--
-    版权声明：版权所有 (c) 2025 Kevin Chang
-    未经许可，不得复制、分发或修改本文件内容。
-    任何未经授权的使用将追究法律责任。
--->
+<?xml version="1.0" ?>
 <data>
-    <!--- 服务端数据 -->
-    <server>
-        <!-- 服务器地址 -->
-        <ip>127.0.0.1</ip>
-        <!-- 服务器端口 -->
-        <port>3624</port>
-    </server>
-    <accounts>
-        <account>
-            <username>admin</username>
-            <password>admin</password>
-        </account>
-        <account>
-            <username>user2</username>
-            <password>admin</password>
-        </account>
-    </accounts>
-    <!--- 聊天记录 -->
-    <chatlog>
-        <!--- 不同用户的聊天记录 -->
-        <user>
-            <!--- 用户的用户名 -->
-            <username>admin</username>
-            <!--- 用户的不同聊天的聊天记录 -->
-            <chat>
-                <!--- 聊天的对方 -->
-                <target>admin</target>
-                <!--- 聊天内容 -->
-                <message>admin: hello</message>
-                <message>admin: hello</message>
-            </chat>
-            <chat>
-                <target>user2</target>
-                <message>user2: hello</message>
-                <message>user2: hello</message>
-            </chat>
-        </user>
+  <server>
+    <ip>127.0.0.1</ip>
+    <port>3624</port>
+  </server>
+  <accounts>
+    <account>
+      <username>admin</username>
+      <password>admin</password>
+    </account>
+    <account>
+      <username>user2</username>
+      <password>admin</password>
+    </account>
+  </accounts>
+  <chatlog>
+    <user>
+      <username>admin</username>
+      <chat>
+        <target>admin</target>
+        <message>
+          <id>1744365444</id>
+          <content>aaa</content>
+        </message>
+        <message>
+          <id>1744365636</id>
+          <content>hi</content>
+        </message>
+        <message>
+          <id>1744366377</id>
+          <content>hi</content>
+        </message>
+      </chat>
+      <chat>
+        <target>user2</target>
+        <message>
+          <id>1744365483</id>
+          <content>hello</content>
+        </message>
+      </chat>
+      <chat>
+        <target>unknown</target>
+        <message>
+          <id>1744374001</id>
+          <content>admin: aaa</content>
+        </message>
+        <message>
+          <id>1744374069</id>
+          <content>admin: aaa</content>
+        </message>
+      </chat>
+    </user>
   </chatlog>
 </data>

@@ -16,27 +16,25 @@
   <chatlog>
     <chat>
       <username>admin</username>
-      <chat>
-        <message>admin:hello</message>
-        <message>admin:hello</message>
-      </chat>
+      <message>
+        <id>1744365444</id>
+        <content>admin:aaa</content>
+      </message>
+      <message>
+        <id>1744374044</id>
+        <content>admin: aaa</content>
+      </message>
+      <message>
+        <id>1744374093</id>
+        <content>admin: aaa</content>
+      </message>
     </chat>
     <chat>
       <username>user2</username>
-      <chat>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-        <message>user2:hello</message>
-      </chat>
+      <message>
+        <id>1744365483</id>
+        <content>user2:hello</content>
+      </message>
     </chat>
   </chatlog>
 </data>

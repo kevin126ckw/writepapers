@@ -8,8 +8,10 @@ import socket
 import threading
 import traceback
 import xml.etree.ElementTree as ElementTree
+from xml.dom import minidom
 import json
 import sys
+import time
 from threading import Lock
 
 # 全局变量：存储所有在线客户端的连接
@@ -31,7 +33,6 @@ def read_xml(keyword):
 
 def save_chat_history_to_xml(message, username, target):
     """将聊天记录保存到XML文件，按用户名区分"""
-    from xml.dom import minidom
     try:
         tree = ElementTree.parse(r'data/server.xml')
         root = tree.getroot()
@@ -40,16 +41,17 @@ def save_chat_history_to_xml(message, username, target):
             user_node = ElementTree.SubElement(root.find(".//chatlog"), "user")
             username_node = ElementTree.SubElement(user_node, "username")
             username_node.text = username
-
-        # 检查是否已经存在目标用户的聊天记录
-        chat_node = user_node.find(f".//chat/target[text()='{target}']/..")
+        chat_node = user_node.find(f".//chat[target='{target}']")
         if chat_node is None:
             chat_node = ElementTree.SubElement(user_node, "chat")
             target_node = ElementTree.SubElement(chat_node, "target")
-            target_node.text = target
-
+            target_node.text = target  # 修正此处，设置target的文本
+        # 添加新的消息节点
         message_node = ElementTree.SubElement(chat_node, "message")
-        message_node.text = message
+        id_node = ElementTree.SubElement(message_node, "id")  # 新增 <id> 子节点
+        id_node.text = str(int(time.time()))  # 使用当前时间戳作为消息ID
+        content_node = ElementTree.SubElement(message_node, "content")  # 新增 <content> 子节点
+        content_node.text = message
 
         # 格式化XML
         xml_str = ElementTree.tostring(root, encoding='utf-8')
@@ -57,7 +59,6 @@ def save_chat_history_to_xml(message, username, target):
 
         # 去除多余的空行
         pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
-
         with open(r'data/server.xml', 'w', encoding='utf-8') as f:
             f.write(pretty_xml_str)
     except Exception as e:
@@ -77,8 +78,16 @@ def read_chat_history_from_xml(username):
                 target_node = chat_node.find("target")
                 if target_node is not None:
                     target = target_node.text
-                    messages = [msg.text for msg in chat_node.findall("message")]
-                    chat_history.extend([f"{target}: {msg}" for msg in messages])
+                    for msg_node in chat_node.findall("message"):
+                        message_id = msg_node.find("id").text
+                        content_node = msg_node.find("content")
+                        if content_node is not None:
+                            content = content_node.text
+                            chat_history.append({
+                                "target": target,
+                                "id": message_id,
+                                "content": content
+                            })
                 else:
                     print(f"Warning: <chat> node without <target> for user {username}")
             return chat_history
@@ -115,7 +124,6 @@ def handle_client(conn, addr):
                 break
             print(f"Received: {data}")
             message = json.loads(data)
-            # 处理客户端发来的消息
             if message['type'] == "login":
                 username = message['data']['username']
                 password = message['data']['password']
@@ -181,11 +189,12 @@ def handle_client(conn, addr):
                 else:
                     send_message({"type": "warning_message", "message": "Target user not online"}, conn)
                     save_chat_history_to_xml(whisper_message, username, target)
+            # 处理客户端发来的消息
             elif message['type'] == "get_chat_history":  # 处理获取聊天记录的消息
                 username = message['data']['username']
                 chat_history = read_chat_history_from_xml(username)
                 print(f"Chat history for {username}: {chat_history}")
-                # 修改返回的聊天记录格式，包含用户名
+                # 修改返回的聊天记录格式，包含用户名、聊天对象和消息ID
                 send_message({"type": "chat_history", "data": {"username": username, "history": chat_history}}, conn)
         except Exception as e:
             print(f"Error handling client: {e}")
