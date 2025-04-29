@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 # @Time    : 2025/4/7
 # @File    : server.py
@@ -8,12 +9,14 @@ import socket
 import threading
 import traceback
 import xml.etree.ElementTree as ElementTree
-from xml.dom import minidom
 import json
 import sys
 import time
+import database
 from threading import Lock
 
+# 全局变量：数据库对象
+db = database.Database()
 # 全局变量：存储所有在线客户端的连接
 clients = []
 # 全局变量：存储已登录的客户端
@@ -31,88 +34,58 @@ def read_xml(keyword):
         raise ValueError(f"Keyword '{keyword}' not found in XML or invalid format.") from e
 
 
-def save_chat_history_to_xml(message, username, target):
-    """将聊天记录保存到XML文件，按用户名区分"""
+def save_chat_history(message, from_user, to_user):
+    """将聊天记录保存到数据库，按UID区分"""
     try:
-        tree = ElementTree.parse(r'data/server.xml')
-        root = tree.getroot()
-        user_node = root.find(f".//chatlog/user[username='{username}']")
-        if user_node is None:
-            user_node = ElementTree.SubElement(root.find(".//chatlog"), "user")
-            username_node = ElementTree.SubElement(user_node, "username")
-            username_node.text = username
-        chat_node = user_node.find(f".//chat[target='{target}']")
-        if chat_node is None:
-            chat_node = ElementTree.SubElement(user_node, "chat")
-            target_node = ElementTree.SubElement(chat_node, "target")
-            target_node.text = target  # 修正此处，设置target的文本
-        # 添加新的消息节点
-        message_node = ElementTree.SubElement(chat_node, "message")
-        id_node = ElementTree.SubElement(message_node, "id")  # 新增 <id> 子节点
-        id_node.text = str(int(time.time()))  # 使用当前时间戳作为消息ID
-        content_node = ElementTree.SubElement(message_node, "content")  # 新增 <content> 子节点
-        content_node.text = message
-
-        # 格式化XML
-        xml_str = ElementTree.tostring(root, encoding='utf-8')
-        pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
-
-        # 去除多余的空行
-        pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
-        with open(r'data/server.xml', 'w', encoding='utf-8') as f:
-            f.write(pretty_xml_str)
+        db.connect("server.sqlite")
+        # 使用转义后的列名 "[from]" 和 "[to]"
+        db.insert_sql(
+            "chat_history",
+            "[content], [from_user], [to_user], [type], [send_time]",
+            [message, from_user, to_user, "text", time.time()]
+        )
+        db.close()
     except Exception as e:
-        print(f"Error saving chat history to XML: {e}")
+        print(f"Error saving chat history to db: {e}")
         print(traceback.format_exc())
 
 
-def read_chat_history_from_xml(username):
-    """从XML文件中读取指定用户的聊天记录"""
+
+def read_chat_history_from_xml(from_user):
+    """从数据库中读取指定用户的聊天记录"""
     try:
-        tree = ElementTree.parse(r'data/server.xml')
-        root = tree.getroot()
-        user_node = root.find(f".//chatlog/user[username='{username}']")
-        if user_node is not None:
-            chat_history = []
-            for chat_node in user_node.findall("chat"):
-                target_node = chat_node.find("target")
-                if target_node is not None:
-                    target = target_node.text
-                    for msg_node in chat_node.findall("message"):
-                        message_id = msg_node.find("id").text
-                        content_node = msg_node.find("content")
-                        if content_node is not None:
-                            content = content_node.text
-                            chat_history.append({
-                                "target": target,
-                                "id": message_id,
-                                "content": content
-                            })
-                else:
-                    print(f"Warning: <chat> node without <target> for user {username}")
-            return chat_history
-        return []
+        chat_history = []
+        print(f"Reading chat history from db,from_user:{from_user}")
+        if isinstance(from_user, int):
+            results = db.select_sql("chat_history", "*", f"from_user='{from_user}'")
+        else:
+            results = db.select_sql("chat_history", "*", f"from_user='{database.get_uid_by_username(from_user)}'")
+        if results is None or not results:
+            return []
+        for row in results:
+            chat_history.append({
+                "uid": row[0],
+                "message": row[1],
+                "from": row[2],
+                "to": row[3],
+                "type": row[4],
+                "send_time": row[5]
+            })
+        return chat_history
     except Exception as e:
-        print(f"Error reading chat history from XML: {e}")
+        print(f"Error reading chat history from database: {e}")
         print(traceback.format_exc())
         return []
 
-
-def read_accounts():
-    tree = ElementTree.parse(r'data/server.xml')
-    root = tree.getroot()
-    accounts = {}
-    for account in root.findall(".//accounts/account"):
-        username = account.find("username").text
-        password = account.find("password").text
-        accounts[username] = password
-    return accounts
 
 
 def send_message(message, conn):
     conn.sendall(json.dumps(message).encode("utf-8") + b"\n")
     print("Send:" + json.dumps(message) + "\n")
 
+def get_user_uid(username):
+    print(f"Getting uid by username from db {username}")
+    return database.get_uid_by_username(username)
 
 def handle_client(conn, addr):
     global logged_in_clients  # 显式声明使用全局变量
@@ -128,8 +101,7 @@ def handle_client(conn, addr):
                 username = message['data']['username']
                 password = message['data']['password']
                 # 验证用户名密码
-                accounts = read_accounts()
-                if username in accounts and accounts[username] == password:
+                if database.check_account_password(get_user_uid(username), password):
                     with lock:  # 使用锁保护全局变量
                         if username in logged_in_clients:
                             send_message({"type": "error_message", "message": "Already logged in"}, conn)
@@ -168,37 +140,36 @@ def handle_client(conn, addr):
                 else:
                     send_message({"type": "warning_message", "message": "You are not admin"}, conn)
             elif message['type'] == "message":  # 处理私信消息
-                target = message['data']['target']
+                to_user = message['data']['target']
                 whisper_message = message['data']['message']
-                username = None
+                from_user = None
                 for user, client_conn in logged_in_clients.items():
                     if client_conn == conn:
-                        username = user
+                        from_user = user
                         break
-                if username is None:
+                if from_user is None:
                     send_message({"type": "error_message", "message": "Please log in first"}, conn)
                     continue
-                target_conn = logged_in_clients.get(target)
+                target_conn = logged_in_clients.get(to_user)
                 if target_conn:
-                    # 修改发送的消息格式
-                    message_content = {"type": "new_message", "data": {"target": username, "message": whisper_message}}
+                    message_content = {"type": "new_message", "data": {"target": get_user_uid(from_user), "message": whisper_message}}
                     send_message(message_content, target_conn)
                     send_message({"type": "server_message", "message": "Message sent"}, conn)
-                    # 保存聊天记录到XML，按用户名区分
-                    save_chat_history_to_xml(whisper_message, username, target)
+                    save_chat_history(whisper_message, get_user_uid(from_user), get_user_uid(to_user))
                 else:
                     send_message({"type": "warning_message", "message": "Target user not online"}, conn)
-                    save_chat_history_to_xml(whisper_message, username, target)
+                    save_chat_history(whisper_message, get_user_uid(from_user), get_user_uid(to_user))
             # 处理客户端发来的消息
             elif message['type'] == "get_chat_history":  # 处理获取聊天记录的消息
-                username = message['data']['username']
-                chat_history = read_chat_history_from_xml(username)
-                print(f"Chat history for {username}: {chat_history}")
+                from_user = message['data']['username']
+                chat_history = read_chat_history_from_xml(get_user_uid(from_user))
+                print(f"Chat history for {from_user}: {chat_history}")
                 # 修改返回的聊天记录格式，包含用户名、聊天对象和消息ID
-                send_message({"type": "chat_history", "data": {"username": username, "history": chat_history}}, conn)
+                send_message({"type": "chat_history", "data": {"username": from_user, "history": chat_history}}, conn)
         except Exception as e:
             print(f"Error handling client: {e}")
             send_message({"type": "warning_message", "message": "An error occurred on the server"}, conn)
+            print(traceback.format_exc())
             break
     with lock:  # 使用锁保护全局变量
         conn.close()
@@ -208,6 +179,7 @@ def handle_client(conn, addr):
 
 
 def main():
+    db.connect("server.sqlite")
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.bind((read_xml("server/ip"), int(read_xml("server/port"))))
     server.listen()
@@ -218,7 +190,6 @@ def main():
         clients.append(conn)
         threading.Thread(target=handle_client, args=(conn, addr)).start()
 
-
 if __name__ == '__main__':
     try:
         main()
@@ -228,4 +199,5 @@ if __name__ == '__main__':
             client.close()
             clients.remove(client)
             logged_in_clients.clear()
+        db.close()
         sys.exit(0)

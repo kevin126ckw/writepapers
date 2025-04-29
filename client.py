@@ -1,3 +1,4 @@
+#!/usr/bin/python
 # -*- coding: utf-8 -*-
 # @Time    : 2025/4/7
 # @File    : server.py
@@ -11,6 +12,7 @@ import threading
 import tkinter as tk
 import traceback
 import time
+import database
 from tkinter import ttk, messagebox
 from xml.etree import ElementTree
 
@@ -21,45 +23,6 @@ from plyer import notification
 from GUI import GUI
 
 
-def save_chat_history_to_xml(message, username):
-    """将聊天记录保存到XML文件，按用户名区分，根据消息ID去重后合并新消息"""
-    from xml.dom import minidom
-
-    try:
-        tree = ElementTree.parse(r'data/client.xml')
-        root = tree.getroot()
-        chat_node = root.find(f".//chatlog/chat[username='{username}']")
-        if chat_node is None:
-            chat_node = ElementTree.SubElement(root.find(".//chatlog"), "chat")
-            username_node = ElementTree.SubElement(chat_node, "username")
-            username_node.text = username
-
-        # 解析新消息的ID和内容
-        new_message_id = str(int(time.time()))
-        new_message_content = message
-
-        # 检查是否已存在相同ID的消息
-        existing_message = chat_node.find(f".//message[id='{new_message_id}']")
-        if existing_message is None:
-            # 添加新的聊天记录
-            message_node = ElementTree.SubElement(chat_node, "message")
-            id_node = ElementTree.SubElement(message_node, "id")
-            id_node.text = new_message_id
-            content_node = ElementTree.SubElement(message_node, "content")
-            content_node.text = new_message_content
-
-        # 格式化XML
-        xml_str = ElementTree.tostring(root, encoding='utf-8')
-        pretty_xml_str = minidom.parseString(xml_str).toprettyxml(indent="  ")
-
-        # 去除多余的空行
-        pretty_xml_str = '\n'.join([line for line in pretty_xml_str.split('\n') if line.strip()])
-
-        with open(r'data/client.xml', 'w', encoding='utf-8') as f:
-            f.write(pretty_xml_str)
-    except Exception as e:
-        print(f"Error saving chat history to XML: {e}")
-        print(traceback.format_exc())
 
 
 class ClientApp(GUI):
@@ -72,9 +35,11 @@ class ClientApp(GUI):
         self.username = None
         self.current_selected_contact = None
         self.connect_to_server()
+        self.db = database.Database()
+        self.db.connect("client.sqlite")
         self.contacts = self.read_contacts_from_xml()
         for contact in self.contacts:
-            self.contact_list.insert(tk.END, contact)
+            self.contact_list.insert(tk.END, contact[3])
         # 设置默认选择第一个用户
         if self.contacts:
             self.msg_display.pack_forget()
@@ -82,6 +47,15 @@ class ClientApp(GUI):
         self.root.bind('<Configure>', self.on_window_resize)
         threading.Thread(target=self.receive_messages, daemon=True).start()
         threading.Thread(target=self.a_unused_thread, daemon=True).start()
+
+    def save_chat_history_to_xml(self, message, from_user, to_user):
+        """将聊天记录保存到db"""
+
+        try:
+            self.db.insert_sql("chat_history", "content, from_user, to_user, type, send_time", [message, from_user, to_user, "text", time.time()])
+        except Exception as e:
+            print(f"Error saving chat history to XML: {e}")
+            print(traceback.format_exc())
 
     @staticmethod
     def read_xml(keyword):
@@ -92,43 +66,36 @@ class ClientApp(GUI):
         except AttributeError as e:
             raise ValueError(f"Keyword '{keyword}' not found in XML or invalid format.") from e
 
-    @staticmethod
-    def read_contacts_from_xml():
+    def read_chat_history_from_db(self, username):
+        """从db中读取指定用户的聊天记录"""
         try:
-            tree = ElementTree.parse(r'data/client.xml')
-            root = tree.getroot()
-            contacts = [contact.text for contact in root.findall(".//contact/username")]
-            return contacts
-        except Exception as e:
-            print(f"Error reading contacts from XML: {e}")
-            print(traceback.format_exc())
-            return []
-
-    @staticmethod
-    def read_chat_history_from_xml(username):
-        """从XML文件中读取指定用户的聊天记录"""
-        try:
-            tree = ElementTree.parse(r'data/client.xml')
-            root = tree.getroot()
-            chat_node = root.find(f".//chatlog/chat[username='{username}']")
-            if chat_node is not None:
-                chat_history = []
-                for msg_node in chat_node.findall("message"):
-                    message_id = msg_node.find("id").text
-                    content_node = msg_node.find("content")
-                    if content_node is not None:
-                        content = content_node.text
-                        chat_history.append({
-                            "id": message_id,
-                            "content": content
-                        })
-                return chat_history
-            return []
+            chat_history = []
+            result = self.db.select_sql("chat_history", "*", f"from_user='{database.get_uid_by_username(username, database_file="client.sqlite")}'")
+            print(result)
+            if result is None or result == []:
+                return []
+            for row in result:
+                chat_history.append({
+                    "id": row[0],
+                    "from_user": row[1],
+                    "to_user": row[2],
+                    "type": row[3],
+                    "content": row[4],
+                    "send_time": row[5]
+                })
+            return chat_history
         except Exception as e:
             print(f"Error reading chat history from XML: {e}")
             print(traceback.format_exc())
             return []
-
+    def read_contacts_from_xml(self):
+        try:
+            contacts = self.db.select_sql("contact", "*")
+            return contacts
+        except Exception as e:
+            print(f"Error reading contacts from db: {e}")
+            print(traceback.format_exc())
+            return []
     def connect_to_server(self):
         try:
             server_ip = self.read_xml("server/ip")
@@ -184,12 +151,12 @@ class ClientApp(GUI):
                 print(f"发送失败: {e}")
                 print(traceback.format_exc())
 
-    def update_chat_display(self, message, username):
+    def update_chat_display(self, message, from_user, to_user):
         self.msg_display.config(state=tk.NORMAL)
-        self.msg_display.insert(tk.END, message + '\n')
+
+        self.msg_display.insert(tk.END, database.get_name_by_uid(from_user, database_file="client.sqlite") + ": " + message + '\n')
         self.msg_display.config(state=tk.DISABLED)
-        # 保存聊天记录到XML，按用户名区分
-        save_chat_history_to_xml(message, username)
+        self.save_chat_history_to_xml(message, from_user,  to_user)
 
     def request_chat_history(self):
         if self.sock:
@@ -213,30 +180,31 @@ class ClientApp(GUI):
                     break
                 messages = data.split('\n')
                 for message_data in messages:  # 将内部循环的变量名改为message_data
+                    print(f"Received: {message_data}")
                     if message_data:
                         msg_dict = json.loads(message_data)
                         print(msg_dict)
                         # 修改解析逻辑
                         if msg_dict.get('type') == 'new_message':
                             target = msg_dict['data']['target']
-                            print(target)
-                            message_content = msg_dict['data']['message']
-                            if target != 'system' and self.current_selected_contact == target:  # 仅当目标不是系统时才更新聊天显示
+                            print("-------",target)
+                            message_content = str(msg_dict['data']['message'])
+                            if target != '9999' and database.get_uid_by_username(self.current_selected_contact, database_file="client.sqlite") == target:  # 仅当目标不是系统时才更新聊天显示
                                 # 更新聊天显示
-                                self.update_chat_display(f"{target}: {message_content}", target)
-                            elif target != 'system' and self.current_selected_contact != target:
+                                self.update_chat_display(f"{message_content}", target, database.get_uid_by_username(self.username, database_file="client.sqlite"))
+                            elif target != '9999' and database.get_uid_by_username(self.current_selected_contact, database_file="client.sqlite") != target:
                                 notification.notify(
-                                    title=target,
+                                    title=database.get_name_by_uid(target, database_file="client.sqlite"),
                                     message=message_content,
                                     timeout=5,
                                     app_name='WritePapers'
                                 )
-                                save_chat_history_to_xml(message_content, target)
+                                self.save_chat_history_to_xml(message_content, database.get_uid_by_username(target, database_file="client.sqlite"), database.get_uid_by_username(self.username, database_file="client.sqlite"))
                             else:
                                 # 处理系统消息
-                                self.update_chat_display(f"system: {message_content}", 'system')
+                                self.update_chat_display(f"system: {message_content}", '9999', database.get_uid_by_username(self.username, database_file="client.sqlite"))
                                 notification.notify(
-                                    title='system',
+                                    title='System',
                                     message=message_content,
                                     timeout=3,
                                     app_name='WritePapers'
@@ -249,14 +217,13 @@ class ClientApp(GUI):
                             chat_data = msg_dict['data']
                             username = chat_data['username']
                             chat_history = chat_data['history']
-                            # 保存聊天记录到XML
                             for msg in chat_history:
                                 try:
                                     target = msg.get("target", "unknown")
-                                    message_id = msg.get("id", "unknown")
+                                    # message_id = msg.get("id", "unknown")
                                     content = msg.get("content", "unknown")
-                                    save_chat_history_to_xml(f"{target}: {content}", username)
-                                    print(f"save chat history to xml:{target}: {content}", username)
+                                    self.save_chat_history_to_xml(f"{content}", username, target)
+                                    print(f"save chat history to xml:{content}", username, target)
                                 except Exception as e:
                                     print(f"Error parsing chat history message: {e}")
 
@@ -279,15 +246,18 @@ class ClientApp(GUI):
         # 获取选中的用户
         selected_index = self.contact_list.curselection()
         if selected_index:
-            selected_user = self.contacts[selected_index[0]]
+            selected_user = self.contacts[selected_index[0]][1]
+            print(f"Selected user: {selected_user}")
             self.current_selected_contact = selected_user
             # 加载并显示选中用户的聊天记录
-            chat_history = self.read_chat_history_from_xml(selected_user)
+            chat_history = self.read_chat_history_from_db(selected_user)
+            print(chat_history)
             self.msg_display.config(state=tk.NORMAL)
             self.msg_display.delete('1.0', tk.END)
             for msg in chat_history:
+                print(f"Loading chat history for {selected_user}: {msg}")
                 # 将字典格式的消息转换为字符串
-                msg_str = f"{msg['id']}: {msg['content']}"
+                msg_str = f"{database.get_name_by_uid(msg['from_user'], database_file="client.sqlite")}: {msg['content']}"
                 self.msg_display.insert(tk.END, msg_str + '\n')
             self.msg_display.config(state=tk.DISABLED)
         str(event)
@@ -300,7 +270,7 @@ class ClientApp(GUI):
     def send_message(self):
         message_content = self.input_box.get()
         self.input_box.delete(0, tk.END)
-        target = self.contact_list.get(tk.ACTIVE)
+        target = self.current_selected_contact
         if target:
             message = {
                 'type': 'message',
@@ -309,7 +279,7 @@ class ClientApp(GUI):
                     'message': message_content
                 }
             }
-            self.update_chat_display(f"{self.username}: {message_content}", target)  # 按用户名更新聊天记录
+            self.update_chat_display(f"{message_content}", database.get_uid_by_username(self.username, database_file="client.sqlite"), database.get_uid_by_username(target, database_file="client.sqlite"))  # 按用户名更新聊天记录
         else:
             message = {
                 'type': 'debugmessage',
